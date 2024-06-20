@@ -79,7 +79,7 @@ async function loadConfluence({ pageUrl, username, accessToken }) {
       docAuthor: subdomain,
       description: doc.metadata.title,
       docSource: `${subdomain} Confluence`,
-      chunkSource: `confluence://${doc.metadata.url}`,
+      chunkSource: `confluence://${doc.metadata.url}?baseUrl=${baseUrl}&token=${accessToken}&username=${username}`,
       published: new Date().toLocaleString(),
       wordCount: doc.pageContent.split(" ").length,
       pageContent: doc.pageContent,
@@ -103,6 +103,82 @@ async function loadConfluence({ pageUrl, username, accessToken }) {
       spaceKey,
       destination: outFolder,
     },
+  };
+}
+
+/**
+ * Gets the page content from a specific Confluence page, not all pages in a workspace.
+ * @returns
+ */
+async function fetchConfluencePage({
+  pageUrl,
+  baseUrl,
+  username,
+  accessToken,
+}) {
+  if (!pageUrl || !baseUrl || !username || !accessToken) {
+    return {
+      success: false,
+      content: null,
+      reason:
+        "You need either a username and access token, or a personal access token (PAT), to use the Confluence connector.",
+    };
+  }
+
+  const { valid, result } = validSpaceUrl(pageUrl);
+  if (!valid) {
+    return {
+      success: false,
+      content: null,
+      reason:
+        "Confluence space URL is not in the expected format of https://domain.atlassian.net/wiki/space/~SPACEID/* or https://customDomain/wiki/space/~SPACEID/*",
+    };
+  }
+
+  console.log(`-- Working Confluence Page ${pageUrl} --`);
+  const { spaceKey } = result;
+  const loader = new ConfluencePagesLoader({
+    baseUrl,
+    spaceKey,
+    username,
+    accessToken,
+  });
+
+  const { docs, error } = await loader
+    .load()
+    .then((docs) => {
+      return { docs, error: null };
+    })
+    .catch((e) => {
+      return {
+        docs: [],
+        error: e.message?.split("Error:")?.[1] || e.message,
+      };
+    });
+
+  if (!docs.length || !!error) {
+    return {
+      success: false,
+      reason: error ?? "No pages found for that Confluence space.",
+      content: null,
+    };
+  }
+
+  const targetDocument = docs.find(
+    (doc) => doc.pageContent && doc.metadata.url === pageUrl
+  );
+  if (!targetDocument) {
+    return {
+      success: false,
+      reason: "Target page could not be found in Confluence space.",
+      content: null,
+    };
+  }
+
+  return {
+    success: true,
+    reason: null,
+    content: targetDocument.pageContent,
   };
 }
 
@@ -195,4 +271,7 @@ function validSpaceUrl(spaceUrl = "") {
   return { valid: false, result: null };
 }
 
-module.exports = loadConfluence;
+module.exports = {
+  loadConfluence,
+  fetchConfluencePage,
+};
